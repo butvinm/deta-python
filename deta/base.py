@@ -1,17 +1,34 @@
-import os
 import datetime
-from typing import Any, Dict, Mapping, Optional, Sequence, Union, overload
+import os
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union, overload
 from urllib.parse import quote
 
-from .service import _Service, JSON_MIME
+from .service import JSON_MIME, _Service
 
 # timeout for Base service in seconds
 BASE_SERVICE_TIMEOUT = 300
 BASE_TTL_ATTRIBUTE = "__expires"
 
+# supported DetaBase types
+Primitive = Union[str, int, float, bool, None]
+Array = List[Any]
+Object = Dict[str, Union[Any, "Object", Array]]
+# Data supported by DetaBase
+Data = Union[Primitive, Array, Object]
+# Item is object with key attribute
+Item = Object
+# Deta Base query. Support hierarchical queries with nested dicts.
+Query = Mapping[str, Union[Data, "Query"]]
+# Update is a mapping of attribute to update operation. Supports hierarchical updates with nested dicts.
+Update = Mapping[str, Union[Data, "Update"]]
+# Updates is a mapping of key to Update.
+Updates = Mapping[str, Union[Data, "Update"]]
+
 
 class FetchResponse:
-    def __init__(self, count: int = 0, last: Optional[str] = None, items: Optional[list] = None):
+    def __init__(
+        self, count: int = 0, last: Optional[str] = None, items: Optional[List[Item]] = None
+    ):
         self.count = count
         self.last = last
         self.items = items if items is not None else []
@@ -35,11 +52,11 @@ class Util:
             self.value = value
 
     class Append:
-        def __init__(self, value: Union[dict, list, str, int, float, bool]):
+        def __init__(self, value: Data):
             self.value = value if isinstance(value, list) else [value]
 
     class Prepend:
-        def __init__(self, value: Union[dict, list, str, int, float, bool]):
+        def __init__(self, value: Data):
             self.value = value if isinstance(value, list) else [value]
 
     def trim(self):
@@ -48,10 +65,10 @@ class Util:
     def increment(self, value: Union[int, float] = 1):
         return self.Increment(value)
 
-    def append(self, value: Union[dict, list, str, int, float, bool]):
+    def append(self, value: Data):
         return self.Append(value)
 
-    def prepend(self, value: Union[dict, list, str, int, float, bool]):
+    def prepend(self, value: Data):
         return self.Prepend(value)
 
 
@@ -65,7 +82,7 @@ class _Base(_Service):
         self._ttl_attribute = BASE_TTL_ATTRIBUTE
         self.util = Util()
 
-    def get(self, key: str) -> Dict[str, Any]:
+    def get(self, key: str) -> Item:
         if not key:
             raise ValueError("parameter 'key' must be a non-empty string")
 
@@ -73,7 +90,7 @@ class _Base(_Service):
         _, res = self._request(f"/items/{key}", "GET")
         return res
 
-    def delete(self, key: str):
+    def delete(self, key: str) -> None:
         """Delete an item from the database
 
         Args:
@@ -88,32 +105,32 @@ class _Base(_Service):
     @overload
     def insert(
         self,
-        data: Union[dict, list, str, int, bool],
+        data: Data,
         key: Optional[str] = None,
-    ) -> dict:
+    ) -> Item:
         ...
 
     @overload
     def insert(
         self,
-        data: Union[dict, list, str, int, bool],
+        data: Data,
         key: Optional[str] = None,
         *,
         expire_in: int,
-    ) -> dict:
+    ) -> Item:
         ...
 
     @overload
     def insert(
         self,
-        data: Union[dict, list, str, int, bool],
+        data: Data,
         key: Optional[str] = None,
         *,
         expire_at: Union[int, float, datetime.datetime],
-    ) -> dict:
+    ) -> Item:
         ...
 
-    def insert(self, data, key=None, *, expire_in=None, expire_at=None):
+    def insert(self, data, key=None, *, expire_in=None, expire_at=None) -> Item:
         data = data.copy() if isinstance(data, dict) else {"value": data}
         if key:
             data["key"] = key
@@ -129,32 +146,32 @@ class _Base(_Service):
     @overload
     def put(
         self,
-        data: Union[dict, list, str, int, bool],
+        data: Data,
         key: Optional[str] = None,
-    ) -> dict:
+    ) -> Item:
         ...
 
     @overload
     def put(
         self,
-        data: Union[dict, list, str, int, bool],
+        data: Data,
         key: Optional[str] = None,
         *,
         expire_in: int,
-    ) -> dict:
+    ) -> Item:
         ...
 
     @overload
     def put(
         self,
-        data: Union[dict, list, str, int, bool],
+        data: Data,
         key: Optional[str] = None,
         *,
         expire_at: Union[int, float, datetime.datetime],
-    ) -> dict:
+    ) -> Item:
         ...
 
-    def put(self, data, key=None, *, expire_in=None, expire_at=None):
+    def put(self, data, key=None, *, expire_in=None, expire_at=None) -> Item:
         """Store (put) an item in the database. Overrides an item if key already exists.
         `key` could be provided as an argument or a field in the data dict.
         If `key` is not provided, the server will generate a random 12-character key.
@@ -170,29 +187,31 @@ class _Base(_Service):
     @overload
     def put_many(
         self,
-        items: Sequence[Union[dict, list, str, int, bool]],
-    ) -> dict:
+        items: Sequence[Data],
+    ) -> Dict[str, Dict[str, List[Item]]]:
         ...
 
     @overload
     def put_many(
         self,
-        items: Sequence[Union[dict, list, str, int, bool]],
+        items: Sequence[Data],
         *,
         expire_in: int,
-    ) -> dict:
+    ) -> Dict[str, Dict[str, List[Item]]]:
         ...
 
     @overload
     def put_many(
         self,
-        items: Sequence[Union[dict, list, str, int, bool]],
+        items: Sequence[Data],
         *,
         expire_at: Union[int, float, datetime.datetime],
-    ) -> dict:
+    ) -> Dict[str, Dict[str, List[Item]]]:
         ...
 
-    def put_many(self, items, *, expire_in=None, expire_at=None):
+    def put_many(
+        self, items, *, expire_in=None, expire_at=None
+    ) -> Dict[str, Dict[str, List[Item]]]:
         if len(items) > 25:
             raise ValueError("cannot put more than 25 items at a time")
 
@@ -209,11 +228,11 @@ class _Base(_Service):
 
     def fetch(
         self,
-        query: Optional[Union[Mapping, Sequence[Mapping]]] = None,
+        query: Optional[Query] = None,
         *,
         limit: int = 1000,
         last: Optional[str] = None,
-    ):
+    ) -> FetchResponse:
         """Fetch items from the database. `query` is an optional filter or list of filters.
         Without a filter, it will return the whole db.
         """
@@ -232,32 +251,32 @@ class _Base(_Service):
     @overload
     def update(
         self,
-        updates: Mapping,
+        updates: Updates,
         key: str,
-    ):
+    ) -> None:
         ...
 
     @overload
     def update(
         self,
-        updates: Mapping,
+        updates: Updates,
         key: str,
         *,
         expire_in: int,
-    ):
+    ) -> None:
         ...
 
     @overload
     def update(
         self,
-        updates: Mapping,
+        updates: Updates,
         key: str,
         *,
         expire_at: Union[int, float, datetime.datetime],
-    ):
+    ) -> None:
         ...
 
-    def update(self, updates, key, *, expire_in=None, expire_at=None):
+    def update(self, updates: Updates, key, *, expire_in=None, expire_at=None) -> None:
         """Update an item in the database.
         `updates` specifies the attribute names and values to update, add or remove.
         `key` is the key of the item to be updated.
@@ -295,7 +314,7 @@ class _Base(_Service):
 
 
 def insert_ttl(
-    item,
+    item: Item,
     ttl_attribute: str,
     expire_in: Optional[Union[int, float]] = None,
     expire_at: Optional[Union[int, float, datetime.datetime]] = None,
